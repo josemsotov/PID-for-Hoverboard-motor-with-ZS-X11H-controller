@@ -108,6 +108,10 @@ class App:
         self.port_var = StringVar()
         self.status_var = StringVar(value="Desconectado")
         self.vel_var = DoubleVar(value=200.0)  # mm/s
+        self.pwm_var = DoubleVar(value=0.0)    # PWM actual (-255 a +255)
+        self.pwm_display = StringVar(value="0.00")  # Para mostrar PWM con 2 decimales
+        self.increment_var = DoubleVar(value=0.01)  # Variable para el incremento
+        self.pwm_increment = 0.01              # Incremento por botón (cambiado de 0.2 a 0.01)
 
         frm = ttk.Frame(root, padding=10)
         frm.grid(row=0, column=0, sticky=(N, S, E, W))
@@ -120,30 +124,48 @@ class App:
         self.cmb_ports.grid(row=0, column=1, sticky=W)
         ttk.Button(frm, text="Refrescar", command=self.refresh_ports).grid(row=0, column=2, padx=4)
         ttk.Button(frm, text="Conectar", command=self.connect).grid(row=0, column=3, padx=4)
-        ttk.Label(frm, textvariable=self.status_var).grid(row=0, column=4, padx=8)
+        ttk.Button(frm, text="Desconectar", command=self.disconnect).grid(row=0, column=4, padx=4)
+        ttk.Label(frm, textvariable=self.status_var).grid(row=0, column=5, padx=8)
 
         # Control
         ttk.Label(frm, text="Velocidad (mm/s)").grid(row=1, column=0, sticky=W, pady=(8, 2))
         self.vel_entry = ttk.Entry(frm, textvariable=self.vel_var, width=10)
         self.vel_entry.grid(row=1, column=1, sticky=W)
+        
+        # Control PWM Incremental
+        ttk.Label(frm, text="PWM Actual").grid(row=2, column=0, sticky=W, pady=(8, 2))
+        self.pwm_label = ttk.Label(frm, textvariable=self.pwm_display, width=10, relief="sunken")
+        self.pwm_label.grid(row=2, column=1, sticky=W)
+        ttk.Button(frm, text="RESET PWM", command=self.reset_pwm).grid(row=2, column=2, padx=4)
+
+        # Control de Incremento PWM
+        ttk.Label(frm, text="Incremento PWM").grid(row=3, column=0, sticky=W, pady=(4, 2))
+        self.increment_entry = ttk.Entry(frm, textvariable=self.increment_var, width=10)
+        self.increment_entry.grid(row=3, column=1, sticky=W)
+        self.increment_entry.bind('<Return>', self.update_increment)
+        self.increment_entry.bind('<FocusOut>', self.update_increment)
+        ttk.Button(frm, text="Aplicar", command=self.update_increment).grid(row=3, column=2, padx=4)
 
         btns = ttk.Frame(frm)
-        btns.grid(row=2, column=0, columnspan=5, pady=8)
-        ttk.Button(btns, text="ADELANTE", command=self.cmd_adelante).grid(row=0, column=1, padx=4)
+        btns.grid(row=4, column=0, columnspan=6, pady=8)
+        ttk.Button(btns, text="ADELANTE (+PWM)", command=self.cmd_adelante).grid(row=0, column=1, padx=4)
         ttk.Button(btns, text="GIRAR_IZQ", command=self.cmd_girar_izq).grid(row=1, column=0, padx=4)
         ttk.Button(btns, text="PARADA", command=self.cmd_parada).grid(row=1, column=1, padx=4)
         ttk.Button(btns, text="BRAKE", command=self.cmd_brake).grid(row=1, column=2, padx=4)
         ttk.Button(btns, text="GIRAR_DER", command=self.cmd_girar_der).grid(row=1, column=3, padx=4)
-        ttk.Button(btns, text="ATRAS", command=self.cmd_atras).grid(row=2, column=1, padx=4)
+        ttk.Button(btns, text="ATRAS (-PWM)", command=self.cmd_atras).grid(row=2, column=1, padx=4)
 
         # Telemetría
         self.txt = Text(frm, width=80, height=12)
-        self.txt.grid(row=3, column=0, columnspan=5, sticky=(N, S, E, W))
-        frm.rowconfigure(3, weight=1)
-        frm.columnconfigure(4, weight=1)
+        self.txt.grid(row=5, column=0, columnspan=6, sticky=(N, S, E, W))
+        frm.rowconfigure(5, weight=1)
+        frm.columnconfigure(5, weight=1)
 
         self.refresh_ports()
         self.poll_data()
+        
+        # Manejar cierre de ventana
+        root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
     def refresh_ports(self):
         ports = self.client.ports()
@@ -162,7 +184,29 @@ class App:
         except Exception as e:
             self.status_var.set(f"Error: {e}")
 
+    def disconnect(self):
+        """Desconectar del puerto serial y liberar recursos"""
+        try:
+            # Enviar comando PARADA antes de desconectar por seguridad
+            if self.client.ser:
+                try:
+                    self.client.write_line("PARADA", wait_ack=False)
+                    time.sleep(0.1)  # Dar tiempo para que se procese
+                except Exception:
+                    pass  # Ignorar errores al enviar PARADA
+            
+            self.client.close()
+            self.status_var.set("Desconectado")
+            self.update_pwm_value(0.0)  # Reset PWM display
+            self.txt.insert(END, "--- DESCONECTADO ---\n")
+            self.txt.see(END)
+        except Exception as e:
+            self.status_var.set(f"Error desconectando: {e}")
+
     def send(self, cmd):
+        if not self.client.ser:
+            self.status_var.set("No conectado")
+            return
         try:
             ok = self.client.write_line(cmd, wait_ack=True)
             if not ok:
@@ -172,25 +216,114 @@ class App:
         except Exception as e:
             self.status_var.set(f"Error: {e}")
 
-    # Botones
+    def update_pwm_display(self):
+        """Actualiza la visualización del PWM actual"""
+        pwm_val = self.pwm_var.get()
+        self.pwm_display.set(f"{pwm_val:.2f}")  # Formato con 2 decimales
+    
+    def update_pwm_value(self, new_value):
+        """Helper para actualizar PWM y su visualización"""
+        self.pwm_var.set(new_value)
+        self.pwm_display.set(f"{new_value:.2f}")
+
+    def update_increment(self, event=None):
+        """Actualiza el incremento de PWM desde la interfaz"""
+        try:
+            new_increment = self.increment_var.get()
+            if 0.001 <= new_increment <= 50:  # Límites razonables
+                self.pwm_increment = new_increment
+                self.txt.insert(END, f"Incremento PWM actualizado a: {new_increment:.3f}\n")
+                self.txt.see(END)
+            else:
+                # Revertir a valor válido
+                self.increment_var.set(self.pwm_increment)
+                self.txt.insert(END, f"Error: Incremento debe estar entre 0.001 y 50\n")
+                self.txt.see(END)
+        except Exception as e:
+            # Revertir a valor válido en caso de error
+            self.increment_var.set(self.pwm_increment)
+            self.txt.insert(END, f"Error al actualizar incremento: {e}\n")
+            self.txt.see(END)
+
+    def reset_pwm(self):
+        """Resetea PWM a 0 y envía comando PARADA"""
+        self.update_pwm_value(0.0)
+        self.send("PARADA")
+
+    def send_pwm_command(self):
+        """Envía comando PWM al Arduino con valores actuales"""
+        pwm_val = self.pwm_var.get()
+        # PWM simétrico: mismo valor para ambas ruedas
+        pwm_L = int(abs(pwm_val)) if pwm_val >= 0 else 0
+        pwm_R = int(abs(pwm_val)) if pwm_val >= 0 else 0
+        
+        if pwm_val == 0:
+            self.send("PARADA")
+        elif pwm_val > 0:
+            # Adelante: ambas ruedas positivas
+            self.send(f"PWM {pwm_L} {pwm_R}")
+        else:
+            # Atrás: cambiar dirección (esto requiere modificar el firmware)
+            # Por ahora usamos PWM negativo
+            self.send(f"PWM {-int(abs(pwm_val))} {-int(abs(pwm_val))}")
+
+    # Botones modificados para control incremental
     def cmd_adelante(self):
-        v = self.vel_var.get()
-        self.send(f"ADELANTE {v}")
+        """Incrementa PWM en incremento configurado (adelante)"""
+        current_pwm = self.pwm_var.get()
+        new_pwm = min(current_pwm + self.pwm_increment, 255)  # Límite máximo 255
+        self.update_pwm_value(new_pwm)
+        self.send_pwm_command()
 
     def cmd_atras(self):
-        v = self.vel_var.get()
-        self.send(f"ATRAS {v}")
+        """Decrementa PWM en incremento configurado (atrás)"""
+        current_pwm = self.pwm_var.get()
+        new_pwm = max(current_pwm - self.pwm_increment, -255)  # Límite mínimo -255
+        self.update_pwm_value(new_pwm)
+        self.send_pwm_command()
 
     def cmd_girar_izq(self):
-        v = self.vel_var.get()
-        self.send(f"GIRAR_IZQ {v}")
+        """Giro izquierda: PWM diferencial"""
+        pwm_val = abs(self.pwm_var.get())
+        if pwm_val == 0:
+            pwm_val = 50  # PWM mínimo para giro
+        # Izquierda hacia atrás, derecha hacia adelante
+        self.send(f"PWM {-int(pwm_val)} {int(pwm_val)}")
 
     def cmd_girar_der(self):
-        v = self.vel_var.get()
-        self.send(f"GIRAR_DER {v}")
+        """Giro derecha: PWM diferencial"""
+        pwm_val = abs(self.pwm_var.get())
+        if pwm_val == 0:
+            pwm_val = 50  # PWM mínimo para giro
+        # Izquierda hacia adelante, derecha hacia atrás
+        self.send(f"PWM {int(pwm_val)} {-int(pwm_val)}")
 
     def cmd_parada(self):
-        self.send("PARADA")
+        """Parada con secuencia: reducir PWM gradualmente, luego STOP y BRAKE"""
+        self.reduce_pwm_and_stop()
+
+    def reduce_pwm_and_stop(self):
+        """Reduce PWM gradualmente hasta 0, luego activa STOP y BRAKE"""
+        current_pwm = self.pwm_var.get()
+        
+        if abs(current_pwm) > 10:
+            # Reducir PWM en pasos de 10 hasta llegar cerca de 0
+            if current_pwm > 0:
+                new_pwm = max(current_pwm - 10, 0)
+            else:
+                new_pwm = min(current_pwm + 10, 0)
+            
+            self.update_pwm_value(new_pwm)
+            self.send_pwm_command()
+            
+            # Programar siguiente reducción en 100ms
+            self.root.after(100, self.reduce_pwm_and_stop)
+        else:
+            # PWM ya está cerca de 0, activar STOP y BRAKE
+            self.update_pwm_value(0.0)
+            self.send("PARADA")
+            # Activar BRAKE después de un breve delay
+            self.root.after(200, lambda: self.send("BRAKE"))
 
     def cmd_brake(self):
         self.send("BRAKE")
@@ -209,9 +342,27 @@ class App:
                     if line.startswith("DATA "):
                         self.txt.insert(END, line + "\n")
                         self.txt.see(END)
+                        # Parsear PWM de la telemetría para sincronizar display
+                        try:
+                            parts = line.split()
+                            if len(parts) >= 9:  # Verificar que hay suficientes datos
+                                pwm_L = int(parts[7])  # PWM L está en posición 7
+                                # Actualizar display solo si el PWM cambió externamente
+                                if abs(pwm_L - self.pwm_var.get()) > 0.005:  # Umbral muy pequeño para detectar cambios reales
+                                    self.update_pwm_value(pwm_L)
+                        except (ValueError, IndexError):
+                            pass  # Ignorar errores de parsing
         except Exception:
             pass
         self.root.after(200, self.poll_data)
+
+    def on_closing(self):
+        """Función llamada al cerrar la ventana - desconecta y cierra limpiamente"""
+        try:
+            self.disconnect()  # Desconectar antes de cerrar
+        except Exception:
+            pass
+        self.root.destroy()  # Cerrar la aplicación
 
 
 def main():

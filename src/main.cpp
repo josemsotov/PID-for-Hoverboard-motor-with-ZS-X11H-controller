@@ -7,16 +7,22 @@ Resumen de pines (Arduino Uno):
   Motor Izquierdo:
     HALL_L  -> 2  (INT0)
     PWM_L   -> 6  (PWM)
-    DIR_L   -> 7
+    DIR_L   -> 7  (LOW=adelante, HIGH=atrás)
     BRAKE_L -> 10 (Digital)
     STOP_L  -> 12 (Digital)
   Motor Derecho:
     HALL_R  -> 3  (INT1)
     PWM_R   -> 9  (PWM)
-    DIR_R   -> 8
+    DIR_R   -> 8  (HIGH=adelante, LOW=atrás) *** INVERSO ***
     BRAKE_R -> 11 (Digital PWM-capable)
     STOP_R  -> 13 (Digital)
   Reservados: 4, 5 (no se usan) | UART USB: 0,1 (no se usan para motores)
+
+LÓGICA DIRECCIONAL ROBOT DIFERENCIAL:
+  ADELANTE: DIR_L=LOW,  DIR_R=HIGH (motores en sentidos opuestos)
+  ATRÁS:    DIR_L=HIGH, DIR_R=LOW  (motores en sentidos opuestos)
+  GIRO_IZQ: DIR_L=HIGH, DIR_R=HIGH (izq atrás, der adelante)
+  GIRO_DER: DIR_L=LOW,  DIR_R=LOW  (izq adelante, der atrás)
 
 Características físicas:
   - Diámetro rueda: 22 cm (0.22 m)
@@ -95,6 +101,7 @@ Mode mode = MODE_PID;
 // Estado de ejecución
 bool stopped = false;  // STOP activo
 bool braked = false;   // BRAKE activo
+int current_pwm_L = 0, current_pwm_R = 0;  // PWM actual con signo
 
 // Tiempo
 uint32_t prevMillis = 0;
@@ -173,6 +180,7 @@ void cmd_parada() {
   setStop(true);    // Activar STOP
   setDirAndPwmLeft(0, 0);
   setDirAndPwmRight(0, 0);
+  current_pwm_L = current_pwm_R = 0;  // Reset PWM tracking
   tgtRpmL = tgtRpmR = 0;
   sendACK();
 }
@@ -188,9 +196,27 @@ void cmd_pwm(int pL, int pR) {
   mode = MODE_PWM_DIRECT;
   setStop(false);   // Deshabilitar STOP
   setBrake(false);  // Deshabilitar BRAKE
-  // Mantener dirección previa en función de signo deseado no aplica en PWM directo; usar DIR por GUI si se desea cambiar sentido.
-  setDirAndPwmLeft(digitalRead(DIR_L), constrain(pL, PWM_MIN, PWM_MAX));
-  setDirAndPwmRight(digitalRead(DIR_R), constrain(pR, PWM_MIN, PWM_MAX));
+  
+  // Manejar PWM con signo: valores negativos invierten dirección
+  int pwmL_abs = abs(pL);
+  int pwmR_abs = abs(pR);
+  
+  // Direcciones INVERSAS para movimiento correcto del robot diferencial
+  // Motor izquierdo: LOW=adelante, HIGH=atrás
+  // Motor derecho: HIGH=adelante, LOW=atrás (INVERSO al izquierdo)
+  bool dirL = (pL >= 0) ? LOW : HIGH;   // Izquierdo: LOW=adelante
+  bool dirR = (pR >= 0) ? HIGH : LOW;   // Derecho: HIGH=adelante (INVERSO)
+  
+  // Guardar PWM actual con signo para telemetría
+  current_pwm_L = pL;
+  current_pwm_R = pR;
+  
+  // Aplicar dirección y PWM
+  digitalWrite(DIR_L, dirL);
+  digitalWrite(DIR_R, dirR);
+  analogWrite(PWM_L, constrain(pwmL_abs, PWM_MIN, PWM_MAX));
+  analogWrite(PWM_R, constrain(pwmR_abs, PWM_MIN, PWM_MAX));
+  
   sendACK();
 }
 
@@ -205,9 +231,12 @@ void set_vel_mmps(float vL_mmps, float vR_mmps) {
   rR = constrain(rR, 0, RPM_ABS_MAX);
   tgtRpmL = rL;
   tgtRpmR = rR;
-  // Dirección: 0 = adelante, 1 = atrás (ajusta según cableado)
-  digitalWrite(DIR_L, (vL_mmps >= 0) ? LOW : HIGH);
-  digitalWrite(DIR_R, (vR_mmps >= 0) ? LOW : HIGH);
+  
+  // Direcciones INVERSAS para robot diferencial
+  // Motor izquierdo: LOW=adelante, HIGH=atrás
+  // Motor derecho: HIGH=adelante, LOW=atrás (INVERSO)
+  digitalWrite(DIR_L, (vL_mmps >= 0) ? LOW : HIGH);   // Izquierdo
+  digitalWrite(DIR_R, (vR_mmps >= 0) ? HIGH : LOW);   // Derecho (INVERSO)
 }
 
 void cmd_vel(float vL_mmps, float vR_mmps) { set_vel_mmps(vL_mmps, vR_mmps); sendACK(); }
@@ -222,7 +251,7 @@ void cmd_ki(float v){ ki = v; sendACK(); }
 void cmd_kd(float v){ kd = v; sendACK(); }
 
 void cmd_get() {
-  // Telemetría: rpmL rpmR mmpsL mmpsR tgtRpmL tgtRpmR kp ki kd stopped mode
+  // Telemetría: rpmL rpmR mmpsL mmpsR tgtRpmL tgtRpmR pwmL pwmR kp ki kd stopped braked mode
   float mmpsL = mmps_from_rpm(rpmL);
   float mmpsR = mmps_from_rpm(rpmR);
   Serial.print(F("DATA "));
@@ -232,10 +261,13 @@ void cmd_get() {
   Serial.print(mmpsR, 3); Serial.print(' ');
   Serial.print(tgtRpmL, 3); Serial.print(' ');
   Serial.print(tgtRpmR, 3); Serial.print(' ');
+  Serial.print(current_pwm_L); Serial.print(' ');
+  Serial.print(current_pwm_R); Serial.print(' ');
   Serial.print(kp, 3); Serial.print(' ');
   Serial.print(ki, 3); Serial.print(' ');
   Serial.print(kd, 3); Serial.print(' ');
   Serial.print(stopped ? 1 : 0); Serial.print(' ');
+  Serial.print(braked ? 1 : 0); Serial.print(' ');
   Serial.println(mode == MODE_PID ? 0 : 1);
 }
 
@@ -308,8 +340,8 @@ void setup() {
   pinMode(STOP_R, OUTPUT);
 
   // Estado inicial
-  digitalWrite(DIR_L, LOW);
-  digitalWrite(DIR_R, LOW);
+  digitalWrite(DIR_L, LOW);    // Izquierdo en posición "adelante"
+  digitalWrite(DIR_R, HIGH);   // Derecho en posición "adelante" (INVERSO)
   setStop(true); // iniciar en STOP por seguridad
   setBrake(false); // BRAKE liberado al inicio
   analogWrite(PWM_L, 0);
