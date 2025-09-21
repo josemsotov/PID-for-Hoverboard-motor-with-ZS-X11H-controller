@@ -112,6 +112,8 @@ class App:
         self.pwm_display = StringVar(value="0.00")  # Para mostrar PWM con 2 decimales
         self.increment_var = DoubleVar(value=0.01)  # Variable para el incremento
         self.pwm_increment = 0.01              # Incremento por botón (cambiado de 0.2 a 0.01)
+        self.pulses_per_rev_var = DoubleVar(value=55.0)  # Pulsos por revolución
+        self.current_pulses_per_rev = 55.0     # Valor actual desde Arduino
 
         frm = ttk.Frame(root, padding=10)
         frm.grid(row=0, column=0, sticky=(N, S, E, W))
@@ -145,6 +147,14 @@ class App:
         self.increment_entry.bind('<Return>', self.update_increment)
         self.increment_entry.bind('<FocusOut>', self.update_increment)
         ttk.Button(frm, text="Aplicar", command=self.update_increment).grid(row=3, column=2, padx=4)
+
+        # Control de Pulsos por Revolución
+        ttk.Label(frm, text="Pulsos/Rev").grid(row=3, column=3, sticky=W, pady=(4, 2), padx=(8, 0))
+        self.pulses_entry = ttk.Entry(frm, textvariable=self.pulses_per_rev_var, width=8)
+        self.pulses_entry.grid(row=3, column=4, sticky=W)
+        self.pulses_entry.bind('<Return>', self.update_pulses_per_rev)
+        self.pulses_entry.bind('<FocusOut>', self.update_pulses_per_rev)
+        ttk.Button(frm, text="Set PPR", command=self.update_pulses_per_rev).grid(row=3, column=5, padx=4)
 
         btns = ttk.Frame(frm)
         btns.grid(row=4, column=0, columnspan=6, pady=8)
@@ -245,6 +255,26 @@ class App:
             self.txt.insert(END, f"Error al actualizar incremento: {e}\n")
             self.txt.see(END)
 
+    def update_pulses_per_rev(self, event=None):
+        """Actualiza los pulsos por revolución en el Arduino"""
+        try:
+            new_ppr = self.pulses_per_rev_var.get()
+            if 1 <= new_ppr <= 1000:  # Límites razonables para sensores Hall
+                self.send(f"PULSES {new_ppr}")
+                self.current_pulses_per_rev = new_ppr
+                self.txt.insert(END, f"Pulsos por revolución actualizados a: {new_ppr:.1f}\n")
+                self.txt.see(END)
+            else:
+                # Revertir a valor válido
+                self.pulses_per_rev_var.set(self.current_pulses_per_rev)
+                self.txt.insert(END, f"Error: Pulsos/Rev debe estar entre 1 y 1000\n")
+                self.txt.see(END)
+        except Exception as e:
+            # Revertir a valor válido en caso de error
+            self.pulses_per_rev_var.set(self.current_pulses_per_rev)
+            self.txt.insert(END, f"Error al actualizar pulsos/rev: {e}\n")
+            self.txt.see(END)
+
     def reset_pwm(self):
         """Resetea PWM a 0 y envía comando PARADA"""
         self.update_pwm_value(0.0)
@@ -342,14 +372,21 @@ class App:
                     if line.startswith("DATA "):
                         self.txt.insert(END, line + "\n")
                         self.txt.see(END)
-                        # Parsear PWM de la telemetría para sincronizar display
+                        # Parsear PWM y PPR de la telemetría para sincronizar display
                         try:
                             parts = line.split()
-                            if len(parts) >= 9:  # Verificar que hay suficientes datos
+                            if len(parts) >= 13:  # Verificar que hay suficientes datos (ahora incluye PPR)
                                 pwm_L = int(parts[7])  # PWM L está en posición 7
-                                # Actualizar display solo si el PWM cambió externamente
-                                if abs(pwm_L - self.pwm_var.get()) > 0.005:  # Umbral muy pequeño para detectar cambios reales
+                                ppr = float(parts[12])  # PULSES_PER_REV está en posición 12
+                                
+                                # Actualizar display PWM solo si cambió externamente
+                                if abs(pwm_L - self.pwm_var.get()) > 0.005:
                                     self.update_pwm_value(pwm_L)
+                                
+                                # Actualizar display PPR solo si cambió externamente
+                                if abs(ppr - self.pulses_per_rev_var.get()) > 0.1:
+                                    self.pulses_per_rev_var.set(ppr)
+                                    self.current_pulses_per_rev = ppr
                         except (ValueError, IndexError):
                             pass  # Ignorar errores de parsing
         except Exception:

@@ -62,7 +62,7 @@ const uint8_t BRAKE_OFF   = LOW;    // Para liberar freno
 // ------------------------ Parámetros físicos/kinemáticos ----------------
 const float WHEEL_DIAMETER_M = 0.22f;     // 22 cm
 const float WHEEL_CIRCUMF_M  = WHEEL_DIAMETER_M * PI; // ~0.690 m
-const float PULSES_PER_REV   = 55.0f;
+float PULSES_PER_REV   = 55.0f;  // Variable ajustable (valor por defecto: 55 pulsos)
 
 // Conversión: mm/s <-> RPM
 inline float rpm_from_mmps(float mmps) { return (mmps / 1000.0f) * 60.0f / WHEEL_CIRCUMF_M; }
@@ -220,9 +220,17 @@ void cmd_girar_der(float v_mmps){ set_vel_mmps( v_mmps, -v_mmps); sendACK(); }
 void cmd_kp(float v){ kp = v; sendACK(); }
 void cmd_ki(float v){ ki = v; sendACK(); }
 void cmd_kd(float v){ kd = v; sendACK(); }
+void cmd_pulses(float v){ 
+  if (v > 0 && v <= 1000) {  // Validar rango razonable
+    PULSES_PER_REV = v; 
+    sendACK(); 
+  } else {
+    sendERR(F("PPR range"));
+  }
+}
 
 void cmd_get() {
-  // Telemetría: rpmL rpmR mmpsL mmpsR tgtRpmL tgtRpmR kp ki kd stopped mode
+  // Telemetría: rpmL rpmR mmpsL mmpsR tgtRpmL tgtRpmR kp ki kd stopped mode ppr
   float mmpsL = mmps_from_rpm(rpmL);
   float mmpsR = mmps_from_rpm(rpmR);
   Serial.print(F("DATA "));
@@ -236,7 +244,8 @@ void cmd_get() {
   Serial.print(ki, 3); Serial.print(' ');
   Serial.print(kd, 3); Serial.print(' ');
   Serial.print(stopped ? 1 : 0); Serial.print(' ');
-  Serial.println(mode == MODE_PID ? 0 : 1);
+  Serial.print(mode == MODE_PID ? 0 : 1); Serial.print(' ');
+  Serial.println(PULSES_PER_REV, 1);  // Agregar pulsos por revolución
 }
 
 void process_line(String s) {
@@ -255,6 +264,7 @@ void process_line(String s) {
   if (cmd == F("KP"))     { float v = rest.toFloat(); cmd_kp(v); return; }
   if (cmd == F("KI"))     { float v = rest.toFloat(); cmd_ki(v); return; }
   if (cmd == F("KD"))     { float v = rest.toFloat(); cmd_kd(v); return; }
+  if (cmd == F("PULSES")) { float v = rest.toFloat(); cmd_pulses(v); return; }
   if (cmd == F("ADELANTE")) { float v = rest.toFloat(); cmd_adelante(v); return; }
   if (cmd == F("ATRAS"))    { float v = rest.toFloat(); cmd_atras(v); return; }
   if (cmd == F("GIRAR_IZQ")){ float v = rest.toFloat(); cmd_girar_izq(v); return; }
