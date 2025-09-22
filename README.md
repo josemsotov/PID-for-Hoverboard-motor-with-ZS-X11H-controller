@@ -44,24 +44,24 @@ python test_connection.py
 
 ## 🔧 Configuración de Hardware
 
-### Pines Arduino Uno (Físicamente Corregidos)
+### Pines Arduino Uno (Intercambiado L ↔ R - Encoder Izquierdo Físico Tenía Problema)
 ```
-Motor Izquierdo (Físico):
-  HALL_L  -> Pin 3 (INT1)
-  PWM_L   -> Pin 9 (PWM)
-  DIR_L   -> Pin 8 (HIGH=adelante, LOW=atrás)
-  ENCODER_L -> Pin 4 (Encoder óptico)
+Motor Izquierdo (Lógico = Derecho Físico):
+  HALL_L  -> Pin 2 (INT0)
+  PWM_L   -> Pin 6 (PWM)
+  DIR_L   -> Pin 7 (LOW=adelante, HIGH=atrás)
+  ENCODER_L -> Pin 5 (Encoder óptico)
 
-Motor Derecho (Físico):  
-  HALL_R  -> Pin 2 (INT0)
-  PWM_R   -> Pin 6 (PWM)
-  DIR_R   -> Pin 7 (LOW=adelante, HIGH=atrás)
-  ENCODER_R -> Pin 5 (Encoder óptico)
+Motor Derecho (Lógico = Izquierdo Físico):  
+  HALL_R  -> Pin 3 (INT1)
+  PWM_R   -> Pin 9 (PWM)
+  DIR_R   -> Pin 8 (HIGH=adelante, LOW=atrás)
+  ENCODER_R -> Pin 4 (Encoder óptico)
 ```
 
 ### PPR (Pulsos por Revolución)
-- Motor Izquierdo: 55 PPR (más rápido naturalmente)
-- Motor Derecho: 45 PPR (más lento naturalmente)
+- Motor Izquierdo (Lógico): 45 PPR 
+- Motor Derecho (Lógico): 55 PPR
 
 ## 🎮 Comandos del Sistema
 
@@ -131,8 +131,9 @@ El sistema detecta automáticamente qué motor va más rápido y aplica factores
 
 ## 📝 Notas Importantes
 
-- **Asignaciones físicas corregidas**: Los nombres L/R coinciden con la realidad física
-- **Motor izquierdo naturalmente más rápido**: El sistema compensa automáticamente
+- **Asignaciones intercambiadas L ↔ R**: Encoder izquierdo físico tenía problema, ahora intercambiado en código
+- **Motor lógicamente izquierdo = físicamente derecho**: El sistema compensa automáticamente
+- **Motor lógicamente derecho = físicamente izquierdo**: Mappeo invertido por problema de hardware
 - **Control diferencial**: Robot se mueve correctamente adelante/atrás/giros
 - **Seguridad**: Comando STOP disponible en todo momento
 

@@ -4,25 +4,28 @@
 
 /*
 Resumen de pines (Arduino Uno):
-  Motor Izquierdo:
-    HALL_L  -> 2  (INT0)
-    PWM_L   -> 6  (PWM)
-    DIR_L   -> 7  (LOW=adelante, HIGH=atrás)
-    BRAKE_L -> 10 (Digital)
-    STOP_L  -> 12 (Digital)
-  Motor Derecho:
-    HALL_R  -> 3  (INT1)
-    PWM_R   -> 9  (PWM)
-    DIR_R   -> 8  (HIGH=adelante, LOW=atrás) *** INVERSO ***
-    BRAKE_R -> 11 (Digital PWM-capable)
-    STOP_R  -> 13 (Digital)
-  Reservados: 4, 5 (no se usan) | UART USB: 0,1 (no se usan para motores)
+  Motor Izquierdo (FÍSICO):
+    HALL_L  -> 3  (INT1) 
+    PWM_L   -> 9  (PWM)
+    DIR_L   -> 8  (HIGH=adelante, LOW=atrás) *** INVERSO ***
+    BRAKE_L -> 11 (Digital PWM-capable)
+    STOP_L  -> 13 (Digital)
+  Motor Derecho (FÍSICO):
+    HALL_R  -> 2  (INT0)
+    PWM_R   -> 6  (PWM)
+    DIR_R   -> 7  (LOW=adelante, HIGH=atrás)
+    BRAKE_R -> 10 (Digital)
+    STOP_R  -> 12 (Digital)
+  Encoders:
+    ENCODER_L -> 5 (Motor lógicamente izquierdo, físicamente derecho)
+    ENCODER_R -> 4 (Motor lógicamente derecho, físicamente izquierdo)
+  Reservados: UART USB: 0,1 (no se usan para motores)
 
-LÓGICA DIRECCIONAL ROBOT DIFERENCIAL:
-  ADELANTE: DIR_L=LOW,  DIR_R=HIGH (motores en sentidos opuestos)
-  ATRÁS:    DIR_L=HIGH, DIR_R=LOW  (motores en sentidos opuestos)
-  GIRO_IZQ: DIR_L=HIGH, DIR_R=HIGH (izq atrás, der adelante)
-  GIRO_DER: DIR_L=LOW,  DIR_R=LOW  (izq adelante, der atrás)
+LÓGICA DIRECCIONAL ROBOT DIFERENCIAL (INTERCAMBIADO L ↔ R):
+  ADELANTE: DIR_L=LOW, DIR_R=HIGH  (motores en sentidos opuestos)
+  ATRÁS:    DIR_L=HIGH,  DIR_R=LOW (motores en sentidos opuestos)
+  GIRO_IZQ: DIR_L=HIGH,  DIR_R=HIGH  (izq atrás, der adelante)
+  GIRO_DER: DIR_L=LOW, DIR_R=LOW (izq adelante, der atrás)
 
 Características físicas:
   - Diámetro rueda: 22 cm (0.22 m)
@@ -45,18 +48,19 @@ Respuestas: "ACK" o "ERR <code>" + (en GET, datos)
 #include <Arduino.h>
 
 // ------------------------ Configuración de pines ------------------------
-const uint8_t HALL_L = 2;   // INT0
-const uint8_t HALL_R = 3;   // INT1
-const uint8_t ENCODER_L = 5; // Encoder óptico rueda izquierda (1 pulso por revolución)
-const uint8_t ENCODER_R = 4; // Encoder óptico rueda derecha (1 pulso por revolución)
-const uint8_t PWM_L  = 6;   // PWM (Timer0)
-const uint8_t DIR_L  = 7;
-const uint8_t PWM_R  = 9;   // PWM (Timer1)
-const uint8_t DIR_R  = 8;
-const uint8_t BRAKE_L = 10;  // Digital - BRAKE motor izquierdo
-const uint8_t BRAKE_R = 11;  // Digital PWM-capable - BRAKE motor derecho
-const uint8_t STOP_L = 12;   // Digital - STOP motor izquierdo
-const uint8_t STOP_R = 13;   // Digital - STOP motor derecho
+// INTERCAMBIADAS L ↔ R - ENCODER IZQUIERDO FÍSICO TENÍA PROBLEMA
+const uint8_t HALL_L = 2;   // INT0 - Motor lógicamente izquierdo (físicamente derecho)
+const uint8_t HALL_R = 3;   // INT1 - Motor lógicamente derecho (físicamente izquierdo)
+const uint8_t ENCODER_L = 5; // Encoder óptico rueda lógicamente izquierda (físicamente derecha)
+const uint8_t ENCODER_R = 4; // Encoder óptico rueda lógicamente derecha (físicamente izquierda)
+const uint8_t PWM_L  = 6;   // PWM (Timer0) - Motor lógicamente izquierdo (físicamente derecho)
+const uint8_t DIR_L  = 7;   // Motor lógicamente izquierdo (físicamente derecho)
+const uint8_t PWM_R  = 9;   // PWM (Timer1) - Motor lógicamente derecho (físicamente izquierdo)
+const uint8_t DIR_R  = 8;   // Motor lógicamente derecho (físicamente izquierdo)
+const uint8_t BRAKE_L = 10; // Digital - BRAKE motor lógicamente izquierdo (físicamente derecho)
+const uint8_t BRAKE_R = 11; // Digital PWM-capable - BRAKE motor lógicamente derecho (físicamente izquierdo)
+const uint8_t STOP_L = 12;  // Digital - STOP motor lógicamente izquierdo (físicamente derecho)
+const uint8_t STOP_R = 13;  // Digital - STOP motor lógicamente derecho (físicamente izquierdo)
 
 // Lógica del driver:
 // BRAKE activo: HIGH = freno electromagnético activo
@@ -73,8 +77,9 @@ const float WHEEL_CIRCUMF_M  = WHEEL_DIAMETER_M * PI; // ~0.690 m
 const float PULSES_PER_REV   = 55.0f;
 
 // PPR individuales por motor (pueden ser diferentes)
-float PULSES_PER_REV_L = 45.0f;  // Motor izquierdo: 45 pulsos/rev
-float PULSES_PER_REV_R = 55.0f;  // Motor derecho: 55 pulsos/rev (valor original)
+// INTERCAMBIADOS L ↔ R - ENCODER IZQUIERDO FÍSICO TENÍA PROBLEMA
+float PULSES_PER_REV_L = 45.0f;  // Motor lógicamente izquierdo (físicamente derecho): 45 pulsos/rev
+float PULSES_PER_REV_R = 55.0f;  // Motor lógicamente derecho (físicamente izquierdo): 55 pulsos/rev
 
 // Conversión: mm/s <-> RPM
 inline float rpm_from_mmps(float mmps) { return (mmps / 1000.0f) * 60.0f / WHEEL_CIRCUMF_M; }
@@ -104,10 +109,23 @@ volatile uint32_t intervalL = 0, intervalR = 0; // ms entre tics
 volatile uint32_t pulsesCountL = 0, pulsesCountR = 0;
 volatile uint32_t lastPulsesL = 0, lastPulsesR = 0;   // Para medición de PPR
 volatile uint32_t lastRevTimeL = 0, lastRevTimeR = 0; // Para medición de PPR
-float measuredPPR_L = 55.0f, measuredPPR_R = 55.0f; // PPR medido en tiempo real
+float measuredPPR_L = 55.0f, measuredPPR_R = 45.0f; // PPR medido en tiempo real - INTERCAMBIADO
 
 // Contadores de activaciones ISR para debug
 volatile uint32_t isrCountL = 0, isrCountR = 0;
+
+// ------------------------ Control de Velocidad Global del Robot ------------------------
+float robot_velocity = 0.0f;        // Velocidad actual del robot (-100 a 100%)
+float velocity_increment = 10.0f;    // Incremento de velocidad por comando (%)
+int robot_direction = 1;             // 1 = adelante, -1 = atrás
+bool robot_moving = false;           // Estado de movimiento del robot
+
+// ------------------------ Sistema de Alineación de Velocidad ------------------------
+float speed_correction_L = 1.0f;    // Factor de corrección para motor lógicamente izquierdo (físicamente derecho)
+float speed_correction_R = 1.0f;    // Factor de corrección para motor lógicamente derecho (físicamente izquierdo)  
+float target_speed_rpm = 0.0f;      // Velocidad objetivo común en RPM
+bool speed_alignment_enabled = true; // Habilitar alineación automática
+float alignment_tolerance = 5.0f;   // Tolerancia de alineación en RPM
 
 // Encoder óptico (1 pulso por revolución)
 volatile uint32_t encoderRevolutions = 0; // Contador de revoluciones
@@ -333,11 +351,11 @@ void cmd_pwm(int pL, int pR) {
   int pwmL_abs = abs(pL);
   int pwmR_abs = abs(pR);
   
-  // Direcciones INVERSAS para movimiento correcto del robot diferencial
-  // Motor izquierdo: LOW=adelante, HIGH=atrás
-  // Motor derecho: HIGH=adelante, LOW=atrás (INVERSO al izquierdo)
-  bool dirL = (pL >= 0) ? LOW : HIGH;   // Izquierdo: LOW=adelante
-  bool dirR = (pR >= 0) ? HIGH : LOW;   // Derecho: HIGH=adelante (INVERSO)
+  // Direcciones CORREGIDAS para movimiento correcto del robot diferencial
+  // Motor izquierdo físico: HIGH=adelante, LOW=atrás
+  // Motor derecho físico: LOW=adelante, HIGH=atrás  
+  bool dirL = (pL >= 0) ? HIGH : LOW;   // Izquierdo físico: HIGH=adelante
+  bool dirR = (pR >= 0) ? LOW : HIGH;   // Derecho físico: LOW=adelante
   
   // Guardar PWM actual con signo para telemetría
   current_pwm_L = pL;
@@ -364,11 +382,11 @@ void set_vel_mmps(float vL_mmps, float vR_mmps) {
   tgtRpmL = rL;
   tgtRpmR = rR;
   
-  // Direcciones INVERSAS para robot diferencial
-  // Motor izquierdo: LOW=adelante, HIGH=atrás
-  // Motor derecho: HIGH=adelante, LOW=atrás (INVERSO)
-  digitalWrite(DIR_L, (vL_mmps >= 0) ? LOW : HIGH);   // Izquierdo
-  digitalWrite(DIR_R, (vR_mmps >= 0) ? HIGH : LOW);   // Derecho (INVERSO)
+  // Direcciones INTERCAMBIADAS L ↔ R - ENCODER IZQUIERDO FÍSICO TENÍA PROBLEMA
+  // Motor lógicamente izquierdo (físicamente derecho): LOW=adelante, HIGH=atrás  
+  // Motor lógicamente derecho (físicamente izquierdo): HIGH=adelante, LOW=atrás
+  digitalWrite(DIR_L, (vL_mmps >= 0) ? LOW : HIGH);    // Lógicamente izquierdo (físicamente derecho)
+  digitalWrite(DIR_R, (vR_mmps >= 0) ? HIGH : LOW);    // Lógicamente derecho (físicamente izquierdo)
 }
 
 void cmd_vel(float vL_mmps, float vR_mmps) { set_vel_mmps(vL_mmps, vR_mmps); sendACK(); }
@@ -469,6 +487,142 @@ void cmd_odometry() {
   Serial.println(PULSES_PER_REV_R, 1);
 }
 
+// ------------------------ Funciones de Control de Velocidad Global ------------------------
+void apply_robot_velocity() {
+  // Aplica la velocidad actual del robot considerando dirección y alineación
+  float base_vel_mmps = (robot_velocity / 100.0f) * robot_direction * 200.0f; // Velocidad máxima 200 mm/s
+  
+  if (robot_moving && abs(robot_velocity) > 0.1f) {
+    if (speed_alignment_enabled) {
+      // Aplicar factores de corrección para alineación
+      float vel_L = base_vel_mmps * speed_correction_L;
+      float vel_R = base_vel_mmps * speed_correction_R;
+      
+      // Configurar modo PID y direcciones
+      mode = MODE_PID;
+      setStop(false);   // Deshabilitar STOP
+      setBrake(false);  // Deshabilitar BRAKE
+      
+      // Convertir a RPM y aplicar directamente a targets
+      float target_rpm_L = rpm_from_mmps(fabs(vel_L));
+      float target_rpm_R = rpm_from_mmps(fabs(vel_R));
+      
+      // Aplicar límites
+      tgtRpmL = constrain(target_rpm_L, 0, RPM_ABS_MAX);
+      tgtRpmR = constrain(target_rpm_R, 0, RPM_ABS_MAX);
+      
+      // Configurar direcciones (INTERCAMBIADAS L ↔ R)
+      digitalWrite(DIR_L, (vel_L >= 0) ? LOW : HIGH);    // Lógicamente izquierdo (físicamente derecho): LOW=adelante
+      digitalWrite(DIR_R, (vel_R >= 0) ? HIGH : LOW);    // Lógicamente derecho (físicamente izquierdo): HIGH=adelante
+      
+      // Actualizar velocidad objetivo para referencia
+      target_speed_rpm = rpm_from_mmps(abs(base_vel_mmps));
+    } else {
+      // Sin alineación - velocidades iguales usando función original
+      set_vel_mmps(base_vel_mmps, base_vel_mmps);
+    }
+  } else {
+    cmd_parada();
+    robot_moving = false;
+    target_speed_rpm = 0.0f;
+  }
+}
+
+void cmd_vel_up() {
+  robot_velocity += velocity_increment;
+  if (robot_velocity > 100.0f) robot_velocity = 100.0f;
+  robot_moving = true;
+  apply_robot_velocity();
+  sendACK();
+}
+
+void cmd_vel_down() {
+  robot_velocity -= velocity_increment;
+  if (robot_velocity < -100.0f) robot_velocity = -100.0f;
+  robot_moving = true;
+  apply_robot_velocity();
+  sendACK();
+}
+
+void cmd_vel_forward() {
+  robot_direction = 1;
+  if (robot_velocity == 0.0f) robot_velocity = velocity_increment;
+  robot_moving = true;
+  apply_robot_velocity();
+  sendACK();
+}
+
+void cmd_vel_backward() {
+  robot_direction = -1;
+  if (robot_velocity == 0.0f) robot_velocity = velocity_increment;
+  robot_moving = true;
+  apply_robot_velocity();
+  sendACK();
+}
+
+void cmd_vel_stop() {
+  robot_velocity = 0.0f;
+  robot_moving = false;
+  cmd_parada();
+  sendACK();
+}
+
+void cmd_vel_increment(float inc) {
+  velocity_increment = constrain(inc, 1.0f, 50.0f);
+  sendACK();
+}
+
+// ------------------------ Funciones de Alineación de Velocidad ------------------------
+void calibrate_speed_alignment() {
+  // Calibra los factores de corrección basándose en las velocidades actuales
+  if (abs(rpmL) > 5.0f && abs(rpmR) > 5.0f) {
+    // Usar el motor más lento como referencia (factor 1.0)
+    float min_rpm = min(abs(rpmL), abs(rpmR));
+    speed_correction_L = min_rpm / abs(rpmL);
+    speed_correction_R = min_rpm / abs(rpmR);
+    
+    // Limitar factores de corrección a rangos razonables
+    speed_correction_L = constrain(speed_correction_L, 0.5f, 1.5f);
+    speed_correction_R = constrain(speed_correction_R, 0.5f, 1.5f);
+  }
+}
+
+void cmd_align_calibrate() {
+  calibrate_speed_alignment();
+  // Aplicar inmediatamente la corrección si el robot está en movimiento
+  if (robot_moving) {
+    apply_robot_velocity();
+  }
+  sendACK();
+}
+
+void cmd_align_enable(bool enable) {
+  speed_alignment_enabled = enable;
+  sendACK();
+}
+
+void cmd_align_factors(float factorL, float factorR) {
+  speed_correction_L = constrain(factorL, 0.5f, 1.5f);
+  speed_correction_R = constrain(factorR, 0.5f, 1.5f);
+  sendACK();
+}
+
+void cmd_align_tolerance(float tolerance) {
+  alignment_tolerance = constrain(tolerance, 1.0f, 20.0f);
+  sendACK();
+}
+
+void cmd_align_status() {
+  Serial.print(F("ALIGN_STATUS "));
+  Serial.print(speed_alignment_enabled ? 1 : 0); Serial.print(' ');
+  Serial.print(speed_correction_L, 3); Serial.print(' ');
+  Serial.print(speed_correction_R, 3); Serial.print(' ');
+  Serial.print(alignment_tolerance, 1); Serial.print(' ');
+  Serial.print(abs(rpmL - rpmR), 2); Serial.print(' '); // Diferencia actual
+  Serial.print(target_speed_rpm, 2);
+  Serial.println();
+}
+
 void cmd_get() {
   // Telemetría extendida: rpmL rpmR mmpsL mmpsR tgtRpmL tgtRpmR pwmL pwmR kp ki kd stopped mode ppr pulsesL pulsesR measPPR_L measPPR_R encoderRevs encoderPulses encoderRevsR encoderPulsesR distL_mm distR_mm revs_L revs_R
   float mmpsL = mmps_from_rpm(rpmL);
@@ -554,6 +708,32 @@ void process_line(String s) {
     return;
   }
 
+  // Comandos de control de velocidad del robot
+  if (cmd == F("VEL_UP"))     { cmd_vel_up(); return; }
+  if (cmd == F("VEL_DOWN"))   { cmd_vel_down(); return; }
+  if (cmd == F("VEL_FORWARD")) { cmd_vel_forward(); return; }
+  if (cmd == F("VEL_BACKWARD")) { cmd_vel_backward(); return; }
+  if (cmd == F("VEL_STOP"))   { cmd_vel_stop(); return; }
+  if (cmd == F("VEL_INC"))    { float v = rest.toFloat(); cmd_vel_increment(v); return; }
+
+  // Comandos de alineación de velocidad
+  if (cmd == F("ALIGN_CALIBRATE")) { cmd_align_calibrate(); return; }
+  if (cmd == F("ALIGN_ENABLE"))  { cmd_align_enable(true); return; }
+  if (cmd == F("ALIGN_DISABLE")) { cmd_align_enable(false); return; }
+  if (cmd == F("ALIGN_STATUS"))  { cmd_align_status(); return; }
+  if (cmd == F("ALIGN_TOLERANCE")) { float v = rest.toFloat(); cmd_align_tolerance(v); return; }
+  if (cmd == F("ALIGN_FACTORS")) {
+    int sp = rest.indexOf(' ');
+    if (sp > 0) {
+      float factorL = rest.substring(0, sp).toFloat();
+      float factorR = rest.substring(sp + 1).toFloat();
+      cmd_align_factors(factorL, factorR);
+    } else {
+      sendERR(F("ALIGN_FACTORS args"));
+    }
+    return;
+  }
+
   sendERR(F("unknown"));
 }
 
@@ -585,9 +765,9 @@ void setup() {
   pinMode(STOP_L, OUTPUT);
   pinMode(STOP_R, OUTPUT);
 
-  // Estado inicial
-  digitalWrite(DIR_L, LOW);    // Izquierdo en posición "adelante"
-  digitalWrite(DIR_R, HIGH);   // Derecho en posición "adelante" (INVERSO)
+  // Estado inicial - INTERCAMBIADO L ↔ R
+  digitalWrite(DIR_L, LOW);    // Lógicamente izquierdo (físicamente derecho) en posición "adelante"
+  digitalWrite(DIR_R, HIGH);   // Lógicamente derecho (físicamente izquierdo) en posición "adelante"
   setStop(true); // iniciar en STOP por seguridad
   setBrake(false); // BRAKE liberado al inicio
   analogWrite(PWM_L, 0);
@@ -627,6 +807,29 @@ void loop() {
   checkEncoder();    // Encoder izquierdo pin 5
   checkEncoderR();   // Encoder derecho pin 4
 
+  // Sistema de alineación automática en tiempo real
+  static uint32_t lastAlignmentCheck = 0;
+  if (speed_alignment_enabled && robot_moving && (now - lastAlignmentCheck) > 1000) { // Cada 1 segundo
+    float speed_diff = abs(rpmL - rpmR);
+    if (speed_diff > alignment_tolerance && abs(rpmL) > 5.0f && abs(rpmR) > 5.0f) {
+      // Aplicar ajuste suave gradual
+      float adjustment_factor = 0.95f; // Ajuste del 5% por vez
+      if (abs(rpmL) > abs(rpmR)) {
+        speed_correction_L *= adjustment_factor;
+      } else {
+        speed_correction_R *= adjustment_factor;
+      }
+      
+      // Limitar factores de corrección
+      speed_correction_L = constrain(speed_correction_L, 0.5f, 1.5f);
+      speed_correction_R = constrain(speed_correction_R, 0.5f, 1.5f);
+      
+      // Aplicar la nueva corrección
+      apply_robot_velocity();
+    }
+    lastAlignmentCheck = now;
+  }
+
   // Leer comandos del puerto serial
   while (Serial.available()) {
     char c = (char)Serial.read();
@@ -648,6 +851,7 @@ void loop() {
 
   if (stopped) {
     // mantener salida a 0
+    current_pwm_L = current_pwm_R = 0;
     analogWrite(PWM_L, 0);
     analogWrite(PWM_R, 0);
     return;
@@ -674,6 +878,10 @@ void loop() {
 
   int pwmL = (int)constrain(ffL + outL, PWM_MIN, PWM_MAX);
   int pwmR = (int)constrain(ffR + outR, PWM_MIN, PWM_MAX);
+
+  // Actualizar variables de seguimiento de PWM
+  current_pwm_L = pwmL;
+  current_pwm_R = pwmR;
 
   analogWrite(PWM_L, pwmL);
   analogWrite(PWM_R, pwmR);

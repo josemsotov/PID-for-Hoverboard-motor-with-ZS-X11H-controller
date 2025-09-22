@@ -17,15 +17,15 @@ Resumen de pines (Arduino Uno):
     BRAKE_R -> 10 (Digital)
     STOP_R  -> 12 (Digital)
   Encoders:
-    ENCODER_L -> 4 (Motor físicamente izquierdo, más rápido)
-    ENCODER_R -> 5 (Motor físicamente derecho, más lento)
+    ENCODER_L -> 5 (Motor lógicamente izquierdo, físicamente derecho)
+    ENCODER_R -> 4 (Motor lógicamente derecho, físicamente izquierdo)
   Reservados: UART USB: 0,1 (no se usan para motores)
 
-LÓGICA DIRECCIONAL ROBOT DIFERENCIAL (CORREGIDA FÍSICAMENTE):
-  ADELANTE: DIR_L=HIGH, DIR_R=LOW  (motores en sentidos opuestos)
-  ATRÁS:    DIR_L=LOW,  DIR_R=HIGH (motores en sentidos opuestos)
-  GIRO_IZQ: DIR_L=LOW,  DIR_R=LOW  (izq atrás, der adelante)
-  GIRO_DER: DIR_L=HIGH, DIR_R=HIGH (izq adelante, der atrás)
+LÓGICA DIRECCIONAL ROBOT DIFERENCIAL (INTERCAMBIADO L ↔ R):
+  ADELANTE: DIR_L=LOW, DIR_R=HIGH  (motores en sentidos opuestos)
+  ATRÁS:    DIR_L=HIGH,  DIR_R=LOW (motores en sentidos opuestos)
+  GIRO_IZQ: DIR_L=HIGH,  DIR_R=HIGH  (izq atrás, der adelante)
+  GIRO_DER: DIR_L=LOW, DIR_R=LOW (izq adelante, der atrás)
 
 Características físicas:
   - Diámetro rueda: 22 cm (0.22 m)
@@ -48,19 +48,19 @@ Respuestas: "ACK" o "ERR <code>" + (en GET, datos)
 #include <Arduino.h>
 
 // ------------------------ Configuración de pines ------------------------
-// INTERCAMBIADAS PARA COINCIDIR CON LA REALIDAD FÍSICA
-const uint8_t HALL_L = 3;   // INT1 - Motor físicamente izquierdo (más rápido)
-const uint8_t HALL_R = 2;   // INT0 - Motor físicamente derecho (más lento)
-const uint8_t ENCODER_L = 4; // Encoder óptico rueda izquierda física (más rápido)
-const uint8_t ENCODER_R = 5; // Encoder óptico rueda derecha física (más lento)
-const uint8_t PWM_L  = 9;   // PWM (Timer1) - Motor físicamente izquierdo
-const uint8_t DIR_L  = 8;   // Motor físicamente izquierdo
-const uint8_t PWM_R  = 6;   // PWM (Timer0) - Motor físicamente derecho
-const uint8_t DIR_R  = 7;   // Motor físicamente derecho
-const uint8_t BRAKE_L = 11; // Digital PWM-capable - BRAKE motor izquierdo físico
-const uint8_t BRAKE_R = 10; // Digital - BRAKE motor derecho físico
-const uint8_t STOP_L = 13;  // Digital - STOP motor izquierdo físico
-const uint8_t STOP_R = 12;  // Digital - STOP motor derecho físico
+// INTERCAMBIADAS L ↔ R - ENCODER IZQUIERDO FÍSICO TENÍA PROBLEMA
+const uint8_t HALL_L = 2;   // INT0 - Motor lógicamente izquierdo (físicamente derecho)
+const uint8_t HALL_R = 3;   // INT1 - Motor lógicamente derecho (físicamente izquierdo)
+const uint8_t ENCODER_L = 5; // Encoder óptico rueda lógicamente izquierda (físicamente derecha)
+const uint8_t ENCODER_R = 4; // Encoder óptico rueda lógicamente derecha (físicamente izquierda)
+const uint8_t PWM_L  = 6;   // PWM (Timer0) - Motor lógicamente izquierdo (físicamente derecho)
+const uint8_t DIR_L  = 7;   // Motor lógicamente izquierdo (físicamente derecho)
+const uint8_t PWM_R  = 9;   // PWM (Timer1) - Motor lógicamente derecho (físicamente izquierdo)
+const uint8_t DIR_R  = 8;   // Motor lógicamente derecho (físicamente izquierdo)
+const uint8_t BRAKE_L = 10; // Digital - BRAKE motor lógicamente izquierdo (físicamente derecho)
+const uint8_t BRAKE_R = 11; // Digital PWM-capable - BRAKE motor lógicamente derecho (físicamente izquierdo)
+const uint8_t STOP_L = 12;  // Digital - STOP motor lógicamente izquierdo (físicamente derecho)
+const uint8_t STOP_R = 13;  // Digital - STOP motor lógicamente derecho (físicamente izquierdo)
 
 // Lógica del driver:
 // BRAKE activo: HIGH = freno electromagnético activo
@@ -77,9 +77,9 @@ const float WHEEL_CIRCUMF_M  = WHEEL_DIAMETER_M * PI; // ~0.690 m
 const float PULSES_PER_REV   = 55.0f;
 
 // PPR individuales por motor (pueden ser diferentes)
-// INTERCAMBIADOS PARA COINCIDIR CON REALIDAD FÍSICA
-float PULSES_PER_REV_L = 55.0f;  // Motor izquierdo físico: 55 pulsos/rev (más rápido)
-float PULSES_PER_REV_R = 45.0f;  // Motor derecho físico: 45 pulsos/rev (más lento)
+// INTERCAMBIADOS L ↔ R - ENCODER IZQUIERDO FÍSICO TENÍA PROBLEMA
+float PULSES_PER_REV_L = 45.0f;  // Motor lógicamente izquierdo (físicamente derecho): 45 pulsos/rev
+float PULSES_PER_REV_R = 55.0f;  // Motor lógicamente derecho (físicamente izquierdo): 55 pulsos/rev
 
 // Conversión: mm/s <-> RPM
 inline float rpm_from_mmps(float mmps) { return (mmps / 1000.0f) * 60.0f / WHEEL_CIRCUMF_M; }
@@ -121,8 +121,8 @@ int robot_direction = 1;             // 1 = adelante, -1 = atrás
 bool robot_moving = false;           // Estado de movimiento del robot
 
 // ------------------------ Sistema de Alineación de Velocidad ------------------------
-float speed_correction_L = 1.0f;    // Factor de corrección para motor izquierdo
-float speed_correction_R = 1.0f;    // Factor de corrección para motor derecho  
+float speed_correction_L = 1.0f;    // Factor de corrección para motor lógicamente izquierdo (físicamente derecho)
+float speed_correction_R = 1.0f;    // Factor de corrección para motor lógicamente derecho (físicamente izquierdo)  
 float target_speed_rpm = 0.0f;      // Velocidad objetivo común en RPM
 bool speed_alignment_enabled = true; // Habilitar alineación automática
 float alignment_tolerance = 5.0f;   // Tolerancia de alineación en RPM
@@ -382,11 +382,11 @@ void set_vel_mmps(float vL_mmps, float vR_mmps) {
   tgtRpmL = rL;
   tgtRpmR = rR;
   
-  // Direcciones CORREGIDAS para robot diferencial (intercambio físico)
-  // Motor izquierdo físico: HIGH=adelante, LOW=atrás  
-  // Motor derecho físico: LOW=adelante, HIGH=atrás
-  digitalWrite(DIR_L, (vL_mmps >= 0) ? HIGH : LOW);   // Izquierdo físico
-  digitalWrite(DIR_R, (vR_mmps >= 0) ? LOW : HIGH);   // Derecho físico
+  // Direcciones INTERCAMBIADAS L ↔ R - ENCODER IZQUIERDO FÍSICO TENÍA PROBLEMA
+  // Motor lógicamente izquierdo (físicamente derecho): LOW=adelante, HIGH=atrás  
+  // Motor lógicamente derecho (físicamente izquierdo): HIGH=adelante, LOW=atrás
+  digitalWrite(DIR_L, (vL_mmps >= 0) ? LOW : HIGH);    // Lógicamente izquierdo (físicamente derecho)
+  digitalWrite(DIR_R, (vR_mmps >= 0) ? HIGH : LOW);    // Lógicamente derecho (físicamente izquierdo)
 }
 
 void cmd_vel(float vL_mmps, float vR_mmps) { set_vel_mmps(vL_mmps, vR_mmps); sendACK(); }
@@ -511,9 +511,9 @@ void apply_robot_velocity() {
       tgtRpmL = constrain(target_rpm_L, 0, RPM_ABS_MAX);
       tgtRpmR = constrain(target_rpm_R, 0, RPM_ABS_MAX);
       
-      // Configurar direcciones (CORREGIDAS físicamente)
-      digitalWrite(DIR_L, (vel_L >= 0) ? HIGH : LOW);   // Izquierdo físico: HIGH=adelante
-      digitalWrite(DIR_R, (vel_R >= 0) ? LOW : HIGH);   // Derecho físico: LOW=adelante
+      // Configurar direcciones (INTERCAMBIADAS L ↔ R)
+      digitalWrite(DIR_L, (vel_L >= 0) ? LOW : HIGH);    // Lógicamente izquierdo (físicamente derecho): LOW=adelante
+      digitalWrite(DIR_R, (vel_R >= 0) ? HIGH : LOW);    // Lógicamente derecho (físicamente izquierdo): HIGH=adelante
       
       // Actualizar velocidad objetivo para referencia
       target_speed_rpm = rpm_from_mmps(abs(base_vel_mmps));
@@ -765,9 +765,9 @@ void setup() {
   pinMode(STOP_L, OUTPUT);
   pinMode(STOP_R, OUTPUT);
 
-  // Estado inicial - CORREGIDO físicamente  
-  digitalWrite(DIR_L, HIGH);   // Izquierdo físico en posición "adelante"
-  digitalWrite(DIR_R, LOW);    // Derecho físico en posición "adelante"
+  // Estado inicial - INTERCAMBIADO L ↔ R
+  digitalWrite(DIR_L, LOW);    // Lógicamente izquierdo (físicamente derecho) en posición "adelante"
+  digitalWrite(DIR_R, HIGH);   // Lógicamente derecho (físicamente izquierdo) en posición "adelante"
   setStop(true); // iniciar en STOP por seguridad
   setBrake(false); // BRAKE liberado al inicio
   analogWrite(PWM_L, 0);
