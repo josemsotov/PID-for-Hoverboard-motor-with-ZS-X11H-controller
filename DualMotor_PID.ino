@@ -72,9 +72,15 @@ inline float mmps_from_rpm(float rpm) { return (rpm * WHEEL_CIRCUMF_M / 60.0f) *
 volatile uint32_t lastTickL = 0, lastTickR = 0; // ms de última detección
 volatile uint32_t intervalL = 0, intervalR = 0; // ms entre tics
 
+// Contadores acumulativos de pulsos
+volatile uint32_t pulsesCountL = 0, pulsesCountR = 0; // Contadores totales de pulsos
+uint32_t lastPulsesL = 0, lastPulsesR = 0; // Para calcular pulsos por revolución
+uint32_t lastRevTimeL = 0, lastRevTimeR = 0; // Tiempo de última revolución completa
+
 // Medidas filtradas/calculadas (actualizadas en loop)
 float rpmL = 0, rpmR = 0;    // medido
 float tgtRpmL = 0, tgtRpmR = 0; // objetivo
+float measuredPPR_L = 55.0f, measuredPPR_R = 55.0f; // PPR medido en tiempo real
 
 // PID por rueda
 float kp = 0.15f, ki = 0.7f, kd = 0.001f;   // base del repo, ajustar en campo
@@ -135,12 +141,50 @@ void isrLeft() {
   uint32_t now = millis();
   intervalL = now - lastTickL;
   lastTickL = now;
+  pulsesCountL++; // Incrementar contador acumulativo
+  
+  // Debug temporal - cada 10 pulsos
+  if (pulsesCountL % 10 == 0) {
+    Serial.print(F("ISR_L: "));
+    Serial.println(pulsesCountL);
+  }
+  
+  // Calcular PPR medido cada revolución aproximada
+  if (pulsesCountL - lastPulsesL >= PULSES_PER_REV) {
+    uint32_t revTime = now - lastRevTimeL;
+    if (revTime > 100) { // Al menos 100ms para una revolución válida
+      float actualRPM = 60000.0f / revTime; // RPM basado en tiempo de revolución
+      uint32_t actualPulses = pulsesCountL - lastPulsesL;
+      measuredPPR_L = 0.8f * measuredPPR_L + 0.2f * (float)actualPulses; // Filtro
+    }
+    lastPulsesL = pulsesCountL;
+    lastRevTimeL = now;
+  }
 }
 
 void isrRight() {
   uint32_t now = millis();
   intervalR = now - lastTickR;
   lastTickR = now;
+  pulsesCountR++; // Incrementar contador acumulativo
+  
+  // Debug temporal - cada 10 pulsos
+  if (pulsesCountR % 10 == 0) {
+    Serial.print(F("ISR_R: "));
+    Serial.println(pulsesCountR);
+  }
+  
+  // Calcular PPR medido cada revolución aproximada
+  if (pulsesCountR - lastPulsesR >= PULSES_PER_REV) {
+    uint32_t revTime = now - lastRevTimeR;
+    if (revTime > 100) { // Al menos 100ms para una revolución válida
+      float actualRPM = 60000.0f / revTime; // RPM basado en tiempo de revolución
+      uint32_t actualPulses = pulsesCountR - lastPulsesR;
+      measuredPPR_R = 0.8f * measuredPPR_R + 0.2f * (float)actualPulses; // Filtro
+    }
+    lastPulsesR = pulsesCountR;
+    lastRevTimeR = now;
+  }
 }
 
 // ------------------------ Cálculo de RPM --------------------
@@ -228,9 +272,18 @@ void cmd_pulses(float v){
     sendERR(F("PPR range"));
   }
 }
+void cmd_reset_pulses() {
+  pulsesCountL = 0;
+  pulsesCountR = 0;
+  lastPulsesL = 0;
+  lastPulsesR = 0;
+  sendACK();
+}
 
 void cmd_get() {
-  // Telemetría: rpmL rpmR mmpsL mmpsR tgtRpmL tgtRpmR kp ki kd stopped mode ppr
+  Serial.println(F("GET_START"));  // Debug línea inicial
+  
+  // Telemetría: rpmL rpmR mmpsL mmpsR tgtRpmL tgtRpmR kp ki kd stopped mode ppr pulsesL pulsesR measPPR_L measPPR_R
   float mmpsL = mmps_from_rpm(rpmL);
   float mmpsR = mmps_from_rpm(rpmR);
   Serial.print(F("DATA "));
@@ -245,13 +298,26 @@ void cmd_get() {
   Serial.print(kd, 3); Serial.print(' ');
   Serial.print(stopped ? 1 : 0); Serial.print(' ');
   Serial.print(mode == MODE_PID ? 0 : 1); Serial.print(' ');
-  Serial.println(PULSES_PER_REV, 1);  // Agregar pulsos por revolución
+  Serial.print(PULSES_PER_REV, 1); Serial.print(' ');  // PPR configurado
+  
+  Serial.println(F("HALFWAY"));  // Debug punto medio
+  
+  Serial.print(pulsesCountL); Serial.print(' ');        // Pulsos acumulados L
+  Serial.print(pulsesCountR); Serial.print(' ');        // Pulsos acumulados R
+  Serial.print(measuredPPR_L, 1); Serial.print(' ');    // PPR medido L
+  Serial.println(measuredPPR_R, 1);                     // PPR medido R
+  
+  Serial.println(F("GET_END"));  // Debug línea final
 }
 
 void process_line(String s) {
   s.trim();
   if (s.length() == 0) return;
   s.toUpperCase();
+
+  // Debug temporal
+  Serial.print(F("RECEIVED_CMD: "));
+  Serial.println(s);
 
   // Tokenización simple
   int sp1 = s.indexOf(' ');
@@ -260,11 +326,16 @@ void process_line(String s) {
 
   if (cmd == F("PARADA")) { cmd_parada(); return; }
   if (cmd == F("BRAKE"))  { cmd_brake(); return; }
-  if (cmd == F("GET"))    { cmd_get(); return; }
+  if (cmd == F("GET"))    { 
+    Serial.println(F("CALLING_CMD_GET"));
+    cmd_get(); 
+    return; 
+  }
   if (cmd == F("KP"))     { float v = rest.toFloat(); cmd_kp(v); return; }
   if (cmd == F("KI"))     { float v = rest.toFloat(); cmd_ki(v); return; }
   if (cmd == F("KD"))     { float v = rest.toFloat(); cmd_kd(v); return; }
   if (cmd == F("PULSES")) { float v = rest.toFloat(); cmd_pulses(v); return; }
+  if (cmd == F("RESET_PULSES")) { cmd_reset_pulses(); return; }
   if (cmd == F("ADELANTE")) { float v = rest.toFloat(); cmd_adelante(v); return; }
   if (cmd == F("ATRAS"))    { float v = rest.toFloat(); cmd_atras(v); return; }
   if (cmd == F("GIRAR_IZQ")){ float v = rest.toFloat(); cmd_girar_izq(v); return; }
@@ -291,20 +362,13 @@ void process_line(String s) {
   sendERR(F("unknown"));
 }
 
-void serialEvent() {
-  while (Serial.available()) {
-    char c = (char)Serial.read();
-    if (c == '\n' || c == '\r') {
-      if (inbuf.length()) { process_line(inbuf); inbuf = ""; }
-    } else {
-      if (inbuf.length() < 80) inbuf += c; // limitar tamaño
-    }
-  }
-}
-
 // ------------------------ Setup/Loop ------------------------
 void setup() {
   Serial.begin(115200);
+  
+  // MARCA DE VERIFICACIÓN - SI VES ESTO, EL FIRMWARE NUEVO ESTÁ CARGADO
+  Serial.println(F("*** FIRMWARE DEBUG VERSION 2.1 LOADED ***"));
+  
   // Pines
   pinMode(HALL_L, INPUT_PULLUP);
   pinMode(HALL_R, INPUT_PULLUP);
@@ -330,6 +394,11 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(HALL_R), isrRight, RISING);
 
   lastTickL = lastTickR = millis();
+  
+  // Inicializar contadores de pulsos
+  pulsesCountL = pulsesCountR = 0;
+  lastPulsesL = lastPulsesR = 0;
+  lastRevTimeL = lastRevTimeR = millis();
 
   Serial.println(F("READY"));
 }
@@ -338,6 +407,16 @@ void loop() {
   uint32_t now = millis();
   float dt = (now - prevMillis) / 1000.0f;
   prevMillis = now;
+
+  // Leer comandos del puerto serial
+  while (Serial.available()) {
+    char c = (char)Serial.read();
+    if (c == '\n' || c == '\r') {
+      if (inbuf.length()) { process_line(inbuf); inbuf = ""; }
+    } else {
+      if (inbuf.length() < 80) inbuf += c; // limitar tamaño
+    }
+  }
 
   // Actualizar RPM medido a partir de intervalos ISR
   uint32_t iL, iR, tL, tR;

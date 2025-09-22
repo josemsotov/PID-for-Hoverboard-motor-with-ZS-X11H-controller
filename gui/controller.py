@@ -114,6 +114,12 @@ class App:
         self.pwm_increment = 0.01              # Incremento por botón (cambiado de 0.2 a 0.01)
         self.pulses_per_rev_var = DoubleVar(value=55.0)  # Pulsos por revolución
         self.current_pulses_per_rev = 55.0     # Valor actual desde Arduino
+        
+        # Variables para mostrar contadores de pulsos
+        self.pulses_L_display = StringVar(value="0")      # Pulsos acumulados motor L
+        self.pulses_R_display = StringVar(value="0")      # Pulsos acumulados motor R
+        self.measured_ppr_L_display = StringVar(value="55.0")  # PPR medido motor L
+        self.measured_ppr_R_display = StringVar(value="55.0")  # PPR medido motor R
 
         frm = ttk.Frame(root, padding=10)
         frm.grid(row=0, column=0, sticky=(N, S, E, W))
@@ -165,10 +171,31 @@ class App:
         ttk.Button(btns, text="GIRAR_DER", command=self.cmd_girar_der).grid(row=1, column=3, padx=4)
         ttk.Button(btns, text="ATRAS (-PWM)", command=self.cmd_atras).grid(row=2, column=1, padx=4)
 
+        # Información de Pulsos
+        pulse_frame = ttk.LabelFrame(frm, text="Contadores de Pulsos", padding=5)
+        pulse_frame.grid(row=5, column=0, columnspan=6, sticky=(N, S, E, W), pady=(5, 0))
+
+        # Motor Izquierdo
+        ttk.Label(pulse_frame, text="Motor L:").grid(row=0, column=0, sticky=W)
+        ttk.Label(pulse_frame, text="Pulsos:").grid(row=0, column=1, sticky=W, padx=(10, 2))
+        ttk.Label(pulse_frame, textvariable=self.pulses_L_display, relief="sunken", width=8).grid(row=0, column=2, sticky=W)
+        ttk.Label(pulse_frame, text="PPR Medido:").grid(row=0, column=3, sticky=W, padx=(10, 2))
+        ttk.Label(pulse_frame, textvariable=self.measured_ppr_L_display, relief="sunken", width=6).grid(row=0, column=4, sticky=W)
+
+        # Motor Derecho  
+        ttk.Label(pulse_frame, text="Motor R:").grid(row=1, column=0, sticky=W)
+        ttk.Label(pulse_frame, text="Pulsos:").grid(row=1, column=1, sticky=W, padx=(10, 2))
+        ttk.Label(pulse_frame, textvariable=self.pulses_R_display, relief="sunken", width=8).grid(row=1, column=2, sticky=W)
+        ttk.Label(pulse_frame, text="PPR Medido:").grid(row=1, column=3, sticky=W, padx=(10, 2))
+        ttk.Label(pulse_frame, textvariable=self.measured_ppr_R_display, relief="sunken", width=6).grid(row=1, column=4, sticky=W)
+
+        # Botón para resetear contadores
+        ttk.Button(pulse_frame, text="Reset Pulsos", command=self.reset_pulse_counters).grid(row=0, column=5, rowspan=2, padx=(10, 0))
+
         # Telemetría
-        self.txt = Text(frm, width=80, height=12)
-        self.txt.grid(row=5, column=0, columnspan=6, sticky=(N, S, E, W))
-        frm.rowconfigure(5, weight=1)
+        self.txt = Text(frm, width=80, height=10)
+        self.txt.grid(row=6, column=0, columnspan=6, sticky=(N, S, E, W))
+        frm.rowconfigure(6, weight=1)
         frm.columnconfigure(5, weight=1)
 
         self.refresh_ports()
@@ -275,6 +302,18 @@ class App:
             self.txt.insert(END, f"Error al actualizar pulsos/rev: {e}\n")
             self.txt.see(END)
 
+    def reset_pulse_counters(self):
+        """Resetea los contadores de pulsos en el Arduino"""
+        try:
+            self.send("RESET_PULSES")
+            self.pulses_L_display.set("0")
+            self.pulses_R_display.set("0")
+            self.txt.insert(END, "Contadores de pulsos reseteados\n")
+            self.txt.see(END)
+        except Exception as e:
+            self.txt.insert(END, f"Error al resetear contadores: {e}\n")
+            self.txt.see(END)
+
     def reset_pwm(self):
         """Resetea PWM a 0 y envía comando PARADA"""
         self.update_pwm_value(0.0)
@@ -375,9 +414,14 @@ class App:
                         # Parsear PWM y PPR de la telemetría para sincronizar display
                         try:
                             parts = line.split()
-                            if len(parts) >= 13:  # Verificar que hay suficientes datos (ahora incluye PPR)
-                                pwm_L = int(parts[7])  # PWM L está en posición 7
-                                ppr = float(parts[12])  # PULSES_PER_REV está en posición 12
+                            
+                            if len(parts) >= 19:  # Verificar que hay suficientes datos (19 campos + DATA)
+                                pwm_L = int(parts[7])           # PWM L está en posición 7
+                                ppr = float(parts[14])          # PULSES_PER_REV está en posición 14
+                                pulses_L = int(parts[15])       # Pulsos acumulados L está en posición 15
+                                pulses_R = int(parts[16])       # Pulsos acumulados R está en posición 16
+                                measured_ppr_L = float(parts[17])  # PPR medido L está en posición 17
+                                measured_ppr_R = float(parts[18])  # PPR medido R está en posición 18
                                 
                                 # Actualizar display PWM solo si cambió externamente
                                 if abs(pwm_L - self.pwm_var.get()) > 0.005:
@@ -387,7 +431,16 @@ class App:
                                 if abs(ppr - self.pulses_per_rev_var.get()) > 0.1:
                                     self.pulses_per_rev_var.set(ppr)
                                     self.current_pulses_per_rev = ppr
-                        except (ValueError, IndexError):
+                                
+                                # Actualizar contadores de pulsos
+                                self.pulses_L_display.set(str(pulses_L))
+                                self.pulses_R_display.set(str(pulses_R))
+                                
+                                # Actualizar PPR medidos
+                                self.measured_ppr_L_display.set(f"{measured_ppr_L:.1f}")
+                                self.measured_ppr_R_display.set(f"{measured_ppr_R:.1f}")
+                                
+                        except (ValueError, IndexError) as e:
                             pass  # Ignorar errores de parsing
         except Exception:
             pass
